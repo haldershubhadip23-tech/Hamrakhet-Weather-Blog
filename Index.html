@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webflow Blog Post Automator</title>
+    <!-- 1. Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar for the log */
+        #statusArea::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #statusArea::-webkit-scrollbar-track {
+            background: #4b5563;
+            /* gray-600 */
+            border-radius: 10px;
+        }
+
+        #statusArea::-webkit-scrollbar-thumb {
+            background: #fbc02d;
+            border-radius: 10px;
+        }
+
+        #statusArea::-webkit-scrollbar-thumb:hover {
+            background: #f9a825;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-2xl border border-gray-700">
+        <h1 class="text-3xl font-bold text-center mb-2">Blog Post Automator</h1>
+        <p class="text-center text-gray-400 mb-6">Indian Weather Report 🇮🇳</p>
+
+        <!-- 
+          Configuration Notes:
+          Please fill in the placeholders in the <script> tag below!
+        -->
+
+        <button id="startButton"
+            class="w-full bg-[#FBC02D] text-gray-900 font-bold py-4 px-6 rounded-lg text-lg transition duration-300 ease-in-out hover:bg-opacity-90 hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-[#fbc02d]/50 disabled:bg-gray-600 disabled:text-gray-400 disabled:cursor-wait">
+            <span id="buttonText">Start Automation</span>
+            <span id="buttonSpinner" class="hidden">
+                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 inline-block text-gray-900"
+                    xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                    </path>
+                </svg>
+                Processing...
+            </span>
+        </button>
+
+        <div class="mt-6">
+            <label for="statusArea" class="block text-sm font-medium text-gray-400 mb-2">Automation Log:</label>
+            <div id="statusArea"
+                class="h-80 w-full bg-gray-900 border border-gray-700 rounded-lg p-4 font-mono text-sm overflow-y-auto whitespace-pre-wrap break-words">
+                <span class="text-gray-500">Awaiting instructions...</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. USER CONFIGURATION ---
+        // PASTE YOUR API KEYS AND IDs HERE
+
+        const API_KEYS = {
+            // Your OpenRouter.ai API Key
+            OPENROUTER: "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",
+
+            // Your Webflow API Key (Bearer Token)
+            // --- REMOVED for security ---
+            // This will now be stored securely in Vercel Environment Variables
+
+            // Your Webflow Collection ID
+            // --- REMOVED for security ---
+            WEBFLOW_COLLECTION_ID: "68ad630402390e12a44bd543" // This is public, but we'll move it to Vercel too
+        };
+
+        const CONFIG = {
+            // Email to send notification to
+            RECIPIENT_EMAIL: "snigdhachandrapaik@gmail.com",
+
+            // The model to use on OpenRouter. 
+            // "google/gemini-pro" is good for recent info.
+            // "mistralai/mistral-7b-instruct" is fast.
+            OPENROUTER_MODEL: "google/gemini-2.5-flash-preview-09-2025",
+
+            // IMPORTANT: Update this with your site's domain AND blog collection path
+            // e.g., "https://hamarakhet-7013b6.webflow.io/blog" (if your collection URL is /blog)
+            YOUR_SITE_BASE_URL: "https://hamarakhet-7013b6.webflow.io/blog", // <-- PLEASE VERIFY '/blog' IS CORRECT
+
+            // IMPORTANT: Update these with the *exact* field slugs from your Webflow Collection
+            WEBFLOW_FIELD_SLUGS: {
+                META_TITLE: "meta-title",           // Field for Meta Title
+                META_DESCRIPTION: "meta-description", // Field for Meta Description
+                MAIN_IMAGE: "main-image",           // Field for Main Image (must be an Image Field)
+                POST_BODY: "post-body",             // Field for Post Body (must be Rich Text or HTML)
+                SCHEMA: "seo-schema"                // Field for Schema (must be Plain Text)
+            },
+
+            // Info for the schema
+            PUBLISHER_NAME: "My Indian Weather Blog", // Your site/org name
+            PUBLISHER_LOGO_URL: "https://placehold.co/600x60.png?text=Your+Logo" // URL to your logo
+        };
+
+        // --- 2. DOM ELEMENTS ---
+        const startButton = document.getElementById('startButton');
+        const buttonText = document.getElementById('buttonText');
+        const buttonSpinner = document.getElementById('buttonSpinner');
+        const statusArea = document.getElementById('statusArea');
+
+        // --- 3. EVENT LISTENER ---
+        startButton.addEventListener('click', handleAutomationStart);
+
+        /**
+         * Main function to control the automation flow
+         */
+        async function handleAutomationStart() {
+            setLoadingState(true);
+            clearLog();
+            logStatus("🚀 Automation started...");
+
+            try {
+                // Step 1: Generate Blog Content
+                logStatus("🧠 Contacting OpenRouter.ai to generate blog post...");
+                const blogContent = await generateBlogContent();
+                logStatus("✅ Content generation complete!", 'success');
+                logStatus(`   - Title: ${blogContent.name}`);
+                logStatus(`   - Slug: ${blogContent.slug}`);
+                console.log("Generated Content:", blogContent);
+
+                // Step 2: Get a relevant image
+                // We use a dynamic image from Unsplash. 4:5 ratio = 800x1000
+                logStatus("🖼️ Fetching main image (800x1000)...");
+                const imageUrl = `https://source.unsplash.com/800x1000?india,weather,map,monsoon`;
+                logStatus(`   - Image URL: ${imageUrl}`);
+
+                // Step 3: Publish to Webflow via our serverless function
+                logStatus("☁️ Calling Vercel Serverless Function (/api/publish)...");
+                const webflowPost = await publishToWebflow(blogContent, imageUrl);
+
+                if (webflowPost.error) {
+                    throw new Error(`Serverless Function Error: ${webflowPost.error}`);
+                }
+
+                logStatus("✅ Successfully published to Webflow!", 'success');
+                logStatus(`   - Item ID: ${webflowPost.id}`);
+                console.log("Webflow Response:", webflowPost);
+
+                // Step 4: Send Email Notification
+                // Note: This opens the user's default email client.
+                const postUrl = `${CONFIG.YOUR_SITE_BASE_URL}/${blogContent.slug}`;
+                logStatus(`📬 Preparing email notification for: ${CONFIG.RECIPIENT_EMAIL}`);
+                sendEmailNotification(postUrl, blogContent.name);
+
+                logStatus("🎉 Automation complete! Email draft opened.", 'success');
+
+            } catch (error) {
+                console.error(error);
+                logStatus(`❌ Critical Error: ${error.message}`, 'error');
+                logStatus("   - Check console (F12) for more details.", 'error');
+                logStatus("   - Verify API keys and Webflow field names.", 'error');
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        /**
+         * Step 1: Generate Blog Content via OpenRouter.ai
+         */
+        async function generateBlogContent() {
+            const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+            const today = new Date();
+            const isoDate = today.toISOString();
+
+            // This prompt is specifically engineered to return JSON
+            const systemPrompt = `You are an expert SEO content writer and meteorologist specializing in Indian weather. Your task is to generate a complete blog post in a specific JSON format. Do not include any text, notes, or markdown formatting outside of the single, complete JSON object.
+
+- Today's date is: ${today.toDateString()}.
+- All content must be accurate and up-to-date.
+- DO NOT use em-dashes (—). Use hyphens (-) instead.
+- The slug must be keyword-researched, lowercase, and hyphen-separated.
+- Meta Title must be 30-45 characters.
+- Meta Description must be 120-145 characters.
+- Post Body must be valid HTML.
+- The highest heading in the post body must be H2. All other headings H2 or H3. The last heading must be H3.
+- The HTML table must include all major Indian states. The table header (<thead>) row (<tr>) must have a background color of #FBC02D.
+- Include sections for 'Weather Alerts' and 'Farming Weather News' (make it engaging and "chatpata" - interesting and relevant for farmers).
+- The schema must be a valid NewsArticle schema.
+`;
+
+            const userPrompt = `Generate the blog post JSON for today's Indian weather report.
+
+{
+  "name": "Blog Name (e.g., 'India Weather Report: Monsoon Updates & Alerts')",
+  "slug": "seo-friendly-slug-for-ranking",
+  "meta_title": "Meta Title (30-45 chars)",
+  "meta_description": "Meta Description (120-145 chars)",
+  "image_alt_text": "SEO alt text for a 4:5 image of an Indian weather map (e.g., 'Map of India showing current weather patterns, monsoon activity, and temperature zones.')",
+  "post_body_html": "HTML content. Start with H2. Include H2/H3 headings. Include the state weather table (header bg #FBC02D). Include 'Weather Alerts' and 'Farming Weather News' sections. End with H3.",
+  "news_schema": {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    "headline": "...",
+    "datePublished": "${isoDate}",
+    "dateModified": "${isoDate}",
+    "description": "...",
+    "author": {
+      "@type": "Organization",
+      "name": "${CONFIG.PUBLISHER_NAME}"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "${CONFIG.PUBLISHER_NAME}",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "${CONFIG.PUBLISHER_LOGO_URL}"
+      }
+    },
+    "mainEntityOfPage": {
+      "@type": "WebPage",
+      "@id": "https://[WILL_BE_REPLACED]"
+    },
+    "image": "https://[WILL_BE_REPLACED]"
+  }
+}
+`;
+
+            const response = await fetch(OPENROUTER_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${API_KEYS.OPENROUTER}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model: CONFIG.OPENROUTER_MODEL,
+                    response_format: { "type": "json_object" }, // Request JSON output
+                    messages: [
+                        { "role": "system", "content": systemPrompt },
+                        { "role": "user", "content": userPrompt }
+                    ]
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`OpenRouter API Error: ${response.status} ${errorText}`);
+            }
+
+            const data = await response.json();
+            const jsonString = data.choices[0].message.content;
+
+            // Parse the JSON string from the response
+            return JSON.parse(jsonString);
+        }
+
+        /**
+         * Step 2: Publish to Webflow
+         * This function is NOW CALLING OUR OWN VERCEL SERVERLESS FUNCTION
+         */
+        async function publishToWebflow(content, imageUrl) {
+            // This is the new endpoint - our own serverless function
+            const API_ENDPOINT = `/api/publish`;
+
+            const response = await fetch(API_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                // Send the content and image URL to our function
+                body: JSON.stringify({
+                    content: content,
+                    imageUrl: imageUrl,
+                    baseUrl: CONFIG.YOUR_SITE_BASE_URL,
+                    publisherName: CONFIG.PUBLISHER_NAME,
+                    publisherLogoUrl: CONFIG.PUBLISHER_LOGO_URL,
+                    fieldSlugs: CONFIG.WEBFLOW_FIELD_SLUGS
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Serverless Function Error: ${response.status} ${errorText}`);
+            }
+
+            return await response.json();
+        }
+
+
+        /**
+         * Step 3: Send Email Notification
+         * This opens the user's default email client.
+         * For fully automatic sending, you need a backend (e.g., Vercel Serverless Function)
+         * and an email API (like Resend, SendGrid, or Postmark).
+         */
+        function sendEmailNotification(postUrl, postName) {
+            const subject = `✅ Blog Post Published: ${postName}`;
+            const body = `Hello,
+
+The new blog post has been successfully generated and published to Webflow.
+
+Title: ${postName}
+URL: ${postUrl}
+
+This is an automated notification.
+`;
+
+            const mailtoUrl = `mailto:${CONFIG.RECIPIENT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+            // Open in a new tab to avoid disrupting the app
+            window.open(mailtoUrl, '_blank');
+        }
+
+        // --- 4. UTILITY FUNCTIONS ---
+
+        /**
+         * Toggles the loading state of the button
+         */
+        function setLoadingState(isLoading) {
+            if (isLoading) {
+                startButton.disabled = true;
+                buttonText.classList.add('hidden');
+                buttonSpinner.classList.remove('hidden');
+            } else {
+                startButton.disabled = false;
+                buttonText.classList.remove('hidden');
+                buttonSpinner.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Clears the log area
+         */
+        function clearLog() {
+            statusArea.innerHTML = '';
+        }
+
+        /**
+         * Adds a message to the log area
+         */
+        function logStatus(message, type = 'info') {
+            const entry = document.createElement('div');
+            let colorClass = 'text-gray-300';
+
+            if (type === 'success') {
+                colorClass = 'text-green-400';
+            } else if (type === 'error') {
+                colorClass = 'text-red-400';
+            } else if (type === 'warn') {
+                colorClass = 'text-yellow-400';
+            }
+
+            entry.className = `mb-1 ${colorClass}`;
+            entry.textContent = message;
+
+            statusArea.appendChild(entry);
+
+            // Auto-scroll to bottom
+            statusArea.scrollTop = statusArea.scrollHeight;
+        }
+
+    </script>
+</body>
+
+</html>
